@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const TuyAPI = require('tuyapi');
 
 const app = express();
 const PORT = 3000;
@@ -10,29 +11,82 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Middleware to parse JSON bodies
 app.use(express.json());
 
+// Tuya Device Configuration
+// Real device information from Tuya CLI wizard
+const LIGHT_1_CONFIG = {
+    id: 'ebaf611b179fb716e0wgxx', // Your actual device ID
+    key: '?8@82@X_{?U&\'r*s', // Your actual device key
+    ip: '192.168.0.110' // From your nmap scan
+};
+
+// For now, we'll use the same device for both lights
+// You can add your second device later if needed
+const LIGHT_2_CONFIG = {
+    id: 'ebaf611b179fb716e0wgxx', // Same device for now
+    key: '?8@82@X_{?U&\'r*s', // Same key for now
+    ip: '192.168.0.179' // From your nmap scan
+};
+
 // Light control function (centralized for both web and Alexa Smart Home API)
-function controlLight(action) {
+async function controlLight(action) {
     console.log(`Light ${action.toUpperCase()}`);
-    // TODO: Replace this with actual IoT device control
-    // Example: Send command to smart light via MQTT, HTTP API, or GPIO
-    return `Light turned ${action.toUpperCase()}`;
+    
+    try {
+        // For now, we'll control both lights
+        // You can modify this to control specific lights if needed
+        const lights = [LIGHT_1_CONFIG, LIGHT_2_CONFIG];
+        const results = [];
+        
+        for (const lightConfig of lights) {
+            try {
+                const device = new TuyAPI({
+                    id: lightConfig.id,
+                    key: lightConfig.key,
+                    ip: lightConfig.ip
+                });
+                
+                // Connect to device
+                await device.connect();
+                
+                // Set the state
+                const state = action === 'on' ? true : false;
+                await device.set({ dps: 1, set: state });
+                
+                // Disconnect
+                device.disconnect();
+                
+                results.push(`Light at ${lightConfig.ip}: ${action.toUpperCase()}`);
+                console.log(`Successfully controlled light at ${lightConfig.ip}`);
+                
+            } catch (deviceError) {
+                console.error(`Error controlling light at ${lightConfig.ip}:`, deviceError.message);
+                results.push(`Light at ${lightConfig.ip}: ERROR - ${deviceError.message}`);
+            }
+        }
+        
+        return `Light control results: ${results.join(', ')}`;
+        
+    } catch (error) {
+        console.error('Error in light control:', error);
+        return `Light control error: ${error.message}`;
+    }
 }
 
 // Route for turning light ON (web dashboard)
-app.post('/light/on', (req, res) => {
-    const result = controlLight('on');
+app.post('/light/on', async (req, res) => {
+    const result = await controlLight('on');
     res.send(result);
 });
 
 // Route for turning light OFF (web dashboard)
-app.post('/light/off', (req, res) => {
-    const result = controlLight('off');
+app.post('/light/off', async (req, res) => {
+    const result = await controlLight('off');
     res.send(result);
 });
 
 // Alexa Smart Home API endpoints
 // Discovery endpoint - tells Alexa what devices are available
-app.post('/alexa/smart-home', (req, res) => {
+app.post('/alexa/smart-home', async (req, res) => {
     const request = req.body;
     console.log('Alexa Smart Home request:', JSON.stringify(request, null, 2));
 
@@ -90,7 +144,7 @@ app.post('/alexa/smart-home', (req, res) => {
         
         // Control the actual light
         const action = powerState === 'ON' ? 'on' : 'off';
-        controlLight(action);
+        await controlLight(action);
         
         // Send response back to Alexa
         const response = {
